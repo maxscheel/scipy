@@ -2028,7 +2028,7 @@ class Delaunay(_QhullUser):
         return out
 
     @cython.boundscheck(False)
-    def find_simplex(self, xi, bruteforce=False, tol=None):
+    def find_simplex(self, xi, bruteforce=False, tol=None, start_vals=None):
         """
         find_simplex(self, xi, bruteforce=False, tol=None)
 
@@ -2045,12 +2045,19 @@ class Delaunay(_QhullUser):
         tol : float, optional
             Tolerance allowed in the inside-triangle check.
             Default is ``100*eps``.
+        start_vals: ndarray of int, shape(ndim)
+            Start triangle indices for individual point
+
 
         Returns
         -------
         i : ndarray of int, same shape as `xi`
             Indices of simplices containing each point.
             Points outside the triangulation get the value -1.
+        bc : ndarray of double, shape (ndim, 3)
+            Barycentric Coordinates for xi within the i.
+            only get returned when `start_vals` is provided
+
 
         Notes
         -----
@@ -2068,7 +2075,9 @@ class Delaunay(_QhullUser):
         cdef int start
         cdef int k
         cdef np.ndarray[np.double_t, ndim=2] x
+        cdef np.ndarray[np.npy_int32, ndim=1] start_vals_
         cdef np.ndarray[np.npy_int, ndim=1] out_
+        cdef np.ndarray[np.double_t, ndim=2] out2_
 
         xi = np.asanyarray(xi)
 
@@ -2080,7 +2089,8 @@ class Delaunay(_QhullUser):
         x = np.ascontiguousarray(xi.astype(np.double))
 
         start = 0
-
+        if start_vals is not None:
+          start_vals_ = np.ascontiguousarray(start_vals.astype(np.int32))
         if tol is None:
             eps = 100 * np.finfo(np.double).eps
         else:
@@ -2088,6 +2098,9 @@ class Delaunay(_QhullUser):
         eps_broad = sqrt(eps)
         out = np.zeros((xi.shape[0],), dtype=np.intc)
         out_ = out
+        out2 = np.zeros((xi.shape[0], 3), dtype=np.double)
+        out2_ = out2
+
         _get_delaunay_info(&info, self, 1, 0, 0)
 
         if bruteforce:
@@ -2099,14 +2112,31 @@ class Delaunay(_QhullUser):
                         eps, eps_broad)
                     out_[k] = isimplex
         else:
-            with nogil:
-                for k in xrange(x.shape[0]):
-                    isimplex = _find_simplex(&info, c,
+            if start_vals is None:
+                with nogil:
+                    for k in xrange(x.shape[0]):
+                        isimplex = _find_simplex(&info, c,
                                              <double*>x.data + info.ndim*k,
-                                             &start, eps, eps_broad)
-                    out_[k] = isimplex
+                                             &start,
+                                             eps, eps_broad)
 
-        return out.reshape(xi_shape[:-1])
+            else:
+                with nogil:
+                    for k in xrange(x.shape[0]):
+                        isimplex = _find_simplex(&info, c,
+                                   <double*>x.data + info.ndim*k,
+                                   <int*>start_vals_.data + k,
+                                   eps, eps_broad)
+
+                        for k2 in xrange(3):
+                            out2_[k,k2] = c[k2]
+                        out_[k] = isimplex
+
+        if start_vals is None:
+            return out.reshape(xi_shape[:-1])
+        else:
+            return out.reshape(xi_shape[:-1]) , out2
+
 
     @cython.boundscheck(False)
     def plane_distance(self, xi):
@@ -2374,15 +2404,15 @@ class ConvexHull(_QhullUser):
     ...                        [0.4, 0.2],
     ...                        [0.3, 0.6]])
 
-    Call ConvexHull with the QG option. QG4 means 
+    Call ConvexHull with the QG option. QG4 means
     compute the portions of the hull not including
-    point 4, indicating the facets that are visible 
+    point 4, indicating the facets that are visible
     from point 4.
 
     >>> hull = ConvexHull(points=generators,
     ...                   qhull_options='QG4')
 
-    The "good" array indicates which facets are 
+    The "good" array indicates which facets are
     visible from point 4.
 
     >>> print(hull.simplices)
