@@ -2119,6 +2119,7 @@ class Delaunay(_QhullUser):
                                              <double*>x.data + info.ndim*k,
                                              &start,
                                              eps, eps_broad)
+                        out_[k] = isimplex
 
             else:
                 with nogil:
